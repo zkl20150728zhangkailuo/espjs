@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 通用网页控制台</title>
+    <style>
+        :root { --primary: #1890ff; --bg: #f0f2f5; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 600px; max-width: 90%; }
+        h2 { margin-bottom: 20px; color: #333; text-align: center; font-size: 20px; }
+        
+        /* 配置区域样式 */
+        .config-row { display: flex; gap: 10px; margin-bottom: 15px; }
+        select { flex: 1; padding: 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; outline: none; cursor: pointer; }
+        select:focus { border-color: var(--primary); }
+
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; margin-bottom: 10px; transition: 0.3s; background: var(--primary); color: white; }
+        .btn:hover { background: #40a9ff; }
+        .btn.disconnect { background: #ff4d4f; }
+        .btn.disconnect:hover { background: #ff7875; }
+        .status { margin-bottom: 10px; font-size: 14px; color: #666; text-align: center; min-height: 20px; }
+        .console { background: #1e1e1e; color: #00ff00; padding: 15px; border-radius: 6px; height: 300px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 14px; white-space: pre-wrap; word-break: break-all; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>🛠️ ESP32 通用控制台</h2>
+        
+        <!-- 1. 型号与波特率选择区 -->
+        <div class="config-row">
+            <select id="boardSelect">
+                <option value="ESP32">ESP32</option>
+                <option value="ESP32-S2">ESP32-S2</option>
+                <option value="ESP32-S3">ESP32-S3</option>
+                <option value="ESP32-C3">ESP32-C3</option>
+                <option value="ESP8266">ESP8266</option>
+            </select>
+            <select id="baudSelect">
+                <option value="9600">9600</option>
+                <option value="115200" selected>115200 (默认)</option>
+                <option value="460800">460800</option>
+                <option value="921600">921600 (高速)</option>
+            </select>
+        </div>
+
+        <button id="connectBtn" class="btn">1. 连接 ESP32 串口</button>
+        <div id="status" class="status">等待连接...</div>
+        <div id="console" class="console">--- 串口日志将实时显示在这里 ---\n</div>
+    </div>
+
+    <script>
+        const connectBtn = document.getElementById('connectBtn');
+        const status = document.getElementById('status');
+        const consoleDiv = document.getElementById('console');
+        const boardSelect = document.getElementById('boardSelect');
+        const baudSelect = document.getElementById('baudSelect');
+        
+        let port = null;
+        let reader = null;
+        let keepReading = true;
+
+        connectBtn.addEventListener('click', async () => {
+            // 如果已经连接，点击按钮则断开
+            if (port && reader) {
+                keepReading = false;
+                await reader.cancel();
+                reader.releaseLock();
+                await port.close();
+                port = null;
+                reader = null;
+                status.innerText = '已断开连接';
+                connectBtn.innerText = '1. 连接 ESP32 串口';
+                connectBtn.classList.remove('disconnect');
+                return;
+            }
+
+            try {
+                if (!('serial' in navigator)) {
+                    status.innerText = '❌ 浏览器不支持！请使用 Chrome 或 Edge';
+                    return;
+                }
+                
+                port = await navigator.serial.requestPort();
+                // 获取用户选择的波特率并转为数字
+                const selectedBaud = parseInt(baudSelect.value);
+                const selectedBoard = boardSelect.value;
+                
+                await port.open({ baudRate: selectedBaud });
+                
+                status.innerText = `✅ 已连接 [${selectedBoard}] | 波特率: ${selectedBaud}`;
+                connectBtn.innerText = '2. 断开连接';
+                connectBtn.classList.add('disconnect');
+                keepReading = true;
+                
+                while (port.readable && keepReading) {
+                    reader = port.readable.getReader();
+                    try {
+                        while (true) {
+                            const { value, done } = await reader.read();
+                            if (done) break;
+                            const text = new TextDecoder().decode(value);
+                            consoleDiv.textContent += text;
+                            consoleDiv.scrollTop = consoleDiv.scrollHeight; 
+                        }
+                    } catch (error) {
+                        consoleDiv.textContent += `\n[读取中断]: ${error.message}\n`;
+                    } finally {
+                        reader.releaseLock();
+                    }
+                }
+            } catch (err) {
+                status.innerText = '❌ 连接失败: ' + err.message;
+            }
+        });
+    </script>
+</body>
+</html>
